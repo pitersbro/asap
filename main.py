@@ -6,6 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Optional
 
 import httpx
 import typer
@@ -53,16 +54,8 @@ class Config:
         return cls()
 
 
-config: Config = Config.resolve()
-
-COLLECT_PR_COMMAND = (
-    'gh pr list --repo "%s" --state merged --author "%s" --limit 1000 --json mergedAt,title,number,url,body '
-    '--json "mergedAt,title,number,url,body" '
-    '--jq \'[.[] | select(.mergedAt >= "%s" and .mergedAt <= "%s") | {number, title, url, body, mergedAt}]\' '
-    "> prs.json"
-)
-
-JIRA_TICKET_PATTERN = re.compile(config.jira_pattern or r"PROJECT-\d+")
+config: Config | None = None
+JIRA_TICKET_PATTERN: re.Pattern | None = None
 
 
 def ask_llm(pr_info: PRInfo, lang="Polish") -> str:
@@ -149,7 +142,7 @@ def _fetch_issue_details(
 
 def build_pr_info(jira: JIRA, pr: dict) -> PRInfo:
     ticket_id = _extract_ticket_id(pr.get("title", ""))
-    jira_url, jira_description = None, None
+    jira_url, jira_description, jira_summary = None, None, None
 
     if ticket_id:
         jira_url, jira_description, jira_summary = _fetch_issue_details(jira, ticket_id)
@@ -223,11 +216,11 @@ def collect_prs(
     if len(res) == 0:
         print("No PRs found in the specified date range.")
     else:
+        print(f"Collected {len(res)} PRs")
         filepath = f"prs{repo.replace('/', '_')}_{start_gte[:10]}_{end_lte[:10]}.json"
         with open(filepath, "w") as f:
             json.dump(res, f, indent=2)
         return filepath
-    print(f"Collected {len(res)} PRs")
 
 
 def enrich_pr_info(pr_info: PRInfo, lang: str) -> PRInfo:
@@ -259,8 +252,8 @@ cli = typer.Typer()
 @cli.command("collect")
 def main(
     repository: str = "myorg/myrepo",
-    start_date: str = "2026-04-01T00:00:00Z",
-    end_date: str = "2026-04-30T23:59:59Z",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     author: str = "@me",
     ai_summary_lang: str = "Polish",
     ai_summary: bool = True,
@@ -270,8 +263,9 @@ def main(
         raise FileNotFoundError(
             f"Environment file '{env_file}' not found. Please create it with the necessary variables."
         )
-    global config
+    global config, JIRA_TICKET_PATTERN
     config = Config.resolve(file_path=env_file)
+    JIRA_TICKET_PATTERN = re.compile(config.jira_pattern or r"PROJECT-\d+")
 
     if not start_date and not end_date:
         start = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
