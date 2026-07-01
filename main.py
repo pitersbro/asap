@@ -74,7 +74,7 @@ def ask_llm(pr_info: PRInfo, lang="Polish") -> str:
             "content-type": "application/json",
         },
         json={
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 1024,
             "system": config.llm_prompt % lang,
             "messages": [
